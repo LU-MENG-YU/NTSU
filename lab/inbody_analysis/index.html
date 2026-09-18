@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'none'; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <meta name="description" content="身體組成資料的本機匯入、團隊分析、球員比較與個人追蹤。">
+  <title>球隊身體組成 · 本地分析平台</title>
+  <link rel="stylesheet" href="css/app.css">
+  <script defer src="vendor/papaparse.min.js"></script>
+  <script defer src="vendor/xlsx.full.min.js"></script>
+  <script defer src="vendor/plotly.min.js"></script>
+  <script defer src="js/core.js"></script>
+  <script defer src="js/data/import.js"></script>
+  <script defer src="js/data/cache.js"></script>
+  <script defer src="js/analysis/engine.js"></script>
+  <script defer src="js/charts/charts.js"></script>
+  <script defer src="js/views/shared.js"></script>
+  <script defer src="js/views/import-home.js"></script>
+  <script defer src="js/views/team-player.js"></script>
+  <script defer src="js/views/comparison.js"></script>
+  <script defer src="js/analysis/report-api.js"></script>
+  <script defer src="js/demo.js"></script>
+  <script defer src="js/app.js"></script>
+</head>
+<body>
+  <a class="skip" href="#main">跳至內容</a>
+  <aside class="sidebar" id="sidebar">
+    <a class="brand" href="#home"><span class="brand-mark">B/</span><span>球隊身體組成<small>LOCAL ANALYTICS · V1.1</small></span></a>
+    <div class="nav-label">分析工作區</div>
+    <nav aria-label="主要導覽">
+      <a href="#home" data-route="home"><span>01</span>首頁與球員名單</a>
+      <a href="#team" data-route="team"><span>02</span>團隊分析</a>
+      <a href="#comparison" data-route="comparison"><span>03</span>個人分析／球員比較</a>
+      <a href="#report" data-route="report"><span>04</span>年度報告 <small>後續</small></a>
+    </nav>
+    <div class="sidebar-bottom"><a href="#import" class="button ghost">資料匯入與驗證</a><p>資料在本機處理<br>無登入・可離線使用</p><span id="cache-status">正在檢查本機資料</span></div>
+  </aside>
+  <div class="workspace">
+    <header class="topbar"><div class="actions"><button id="sidebar-toggle" class="small" aria-expanded="true" aria-controls="sidebar">☰ 收合功能欄</button><span class="version-label">LOCAL ANALYTICS · V1.1</span></div><span id="data-badge" class="badge">尚未匯入</span></header>
+    <main id="main" tabindex="-1"><div class="empty">正在載入本機資料…</div></main>
+    <footer>分類依目前球員名單。差異：<b class="up">+ 增加</b> / <b class="down">− 減少</b>，僅表示方向。</footer>
+  </div>
+  <div id="toast" role="status" aria-live="polite"></div>
+  <dialog id="player-menu" aria-labelledby="menu-title"></dialog>
+  <noscript>請啟用瀏覽器 JavaScript 以執行本機分析。</noscript>
+</body>
+</html>
