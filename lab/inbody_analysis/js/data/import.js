@@ -112,9 +112,13 @@
       for(const h of s.headers){
         if(['name','analysis_date'].includes(reversed.get(h)))continue;
         const values=s.rows.map(r=>r.raw[h]);
+        const singleImpedance=/^impedance$/i.test(h);
         const impedance=values.some(v=>String(v).includes('^'))||/impedance|阻抗/i.test(h);
         const key=reversed.get(h)||h;
-        if(impedance){
+        if(singleImpedance){
+          addMetric({key,label:`${h}（單一阻抗）`,unit:'Ω',impedanceFormat:'scalar'});
+          columns.push({h,key,impedanceFormat:'scalar'});
+        }else if(impedance){
           const childKeys=[1,2,3].map(i=>`${key}_${i}`);
           if(childKeys.some(k=>s.headers.includes(k)||(keys.has(k)&&registry.find(m=>m.key===k)?.parent!==key)))throw Error(`阻抗拆分欄位 ${key}_1/2/3 與既有欄位衝突。`);
           childKeys.forEach((k,i)=>addMetric({key:k,label:`${h} · 波段 ${i+1}`,unit:'Ω',parent:key,band:i+1}));
@@ -141,7 +145,7 @@
             if(!parsed.valid)warn(B.clean(raw)?'invalid-impedance':'missing',r.source,c.h,parsed.reason+'；此欄三波段視為缺失，其他指標仍可分析。',raw);
           }else{
             values[c.key]=B.number(raw);
-            if(values[c.key]===null)warn(B.clean(raw)?'invalid-number':'missing',r.source,c.h,B.clean(raw)?'非有效數字，分析視為缺失，原始值保留。':'空白值，不參與統計。',raw);
+            if(values[c.key]===null)warn(B.clean(raw)?'invalid-number':'missing',r.source,c.h,B.clean(raw)?(c.impedanceFormat==='scalar'?'單一阻抗須為一個有效數值（Ω），不以 ^ 分段；此值視為缺失，原始值保留。':'非有效數字，分析視為缺失，原始值保留。'):'空白值，不參與統計。',raw);
           }
         }
         if(reasons.length){const problemFields={};if(!rawName||!player)problemFields[s.map.name]=r.raw[s.map.name];if(!date)problemFields[s.map.analysis_date]=r.raw[s.map.analysis_date];report.excluded.push({...r,reason:reasons.join('；'),problemFields});warn('excluded',r.source,'姓名／日期',reasons.join('；'),Object.values(problemFields).join(' / '));continue;}
@@ -150,6 +154,6 @@
     }
     rows.sort((a,b)=>a.date.localeCompare(b.date));report.included=rows.length;
     if(!rows.length)warn('no-valid-rows',{},'資料集',`沒有可分析資料。請修正姓名與日期；共 ${report.total} 列、排除 ${report.excluded.length} 列。`);
-    return {schema:B.SCHEMA,players:roster,seasons,rows,registry,metadata:{version:B.VERSION,importedAt:new Date().toISOString(),demo:!!options.demo,sources:selected.map(s=>({file:s.file,sheet:s.sheet,type:s.type,rows:s.rows.length,...s.fileInfo})),report}};
+    return {schema:B.SCHEMA,players:roster,seasons,rows,registry,metadata:{version:B.VERSION,parserVersion:B.PARSER_VERSION,importedAt:new Date().toISOString(),demo:!!options.demo,sources:selected.map(s=>({file:s.file,sheet:s.sheet,type:s.type,rows:s.rows.length,...s.fileInfo})),report}};
   };
 })(BB);

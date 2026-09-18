@@ -14,9 +14,19 @@
     let previous=null;
     return series.map(r=>{const out={...r,...A.delta(r.value,previous?.value),base:B.valid(r.value)?previous?.period||null:null,baseLabel:B.valid(r.value)?previous?.label||previous?.period||null:null,previous:B.valid(r.value)?previous?.value??null:null};if(B.valid(r.value))previous=r;return out;});
   };
-  A.periodKey=(date,unit)=>date.slice(0,unit==='day'?10:unit==='year'?4:7);
+  A.periodKey=(date,unit)=>unit==='week'?B.iso(Date.parse(date+'T00:00:00Z')-new Date(date+'T00:00:00Z').getUTCDay()*B.DAY):date.slice(0,unit==='day'?10:unit==='year'?4:7);
   A.periods=(start,end,unit='month')=>{
     const range=B.range(start,end);const p=[];let date=range.start;
+    if(unit==='week'){
+      let sunday=A.periodKey(range.start,'week');
+      while(sunday<=range.end){
+        const saturday=B.iso(Date.parse(sunday+'T00:00:00Z')+6*B.DAY),start=sunday<range.start?range.start:sunday,end=saturday>range.end?range.end:saturday;
+        const weekLabel='W'+(p.length+1),dateLabel=start.replace(/-/g,'/')+'～'+end.replace(/-/g,'/');
+        p.push({key:sunday,label:weekLabel+'（'+dateLabel+'）',weekLabel,dateLabel,start,end});
+        sunday=B.iso(Date.parse(sunday+'T00:00:00Z')+7*B.DAY);
+      }
+      return p;
+    }
     if(unit==='month')date=date.slice(0,7)+'-01';if(unit==='year')date=date.slice(0,4)+'-01-01';
     while(date<=range.end){
       const d=new Date(date+'T00:00:00Z'),period=A.periodKey(date,unit);
@@ -25,6 +35,13 @@
     }
     return p;
   };
+  A.windowPeriods=(historyStart,start,end,unit='month')=>{
+    if(unit!=='week')return A.periods(historyStart,end,unit).map(p=>({...p,start:p.end>=start&&p.start<start?start:p.start,end:p.end>end?end:p.end}));
+    const visible=A.periods(start,end,'week'),previousEnd=B.iso(Date.parse(visible[0].key+'T00:00:00Z')-B.DAY);
+    const history=historyStart<=previousEnd?A.periods(historyStart,previousEnd,'week').map(p=>({...p,label:p.dateLabel,weekLabel:undefined})):[];
+    return [...history,...visible];
+  };
+  A.periodDetails=p=>p.weekLabel?{weekLabel:p.weekLabel,dateLabel:p.dateLabel}:{};
   A.customPeriods=(start,end,history=[])=>{
     // Arbitrary ranges have no implied predecessor. Use only explicitly supplied intervals.
     const current=B.range(start,end),earlier=history.map(p=>B.range(p.start,p.end));
@@ -40,6 +57,7 @@
     }
     players(filter={}){return this.data.players.filter(p=>(!filter.level||p.level===filter.level)&&(!filter.position||p.position===filter.position)&&(!filter.name||p.name===filter.name));}
     aggregate({filter={},unit='month',method='avg',start=this.min,end=this.max,periods=null}={}){
+      if(unit==='week')method='avg';
       const cacheKey=JSON.stringify({filter,unit,method,start,end,periods});if(this.cache.has(cacheKey))return this.cache.get(cacheKey);
       const players=this.players(filter),names=new Set(players.map(p=>p.name));
       const defs=periods||A.periods(start,end,unit),byPeriod=new Map(defs.map(p=>[p.key,new Map()]));
@@ -59,8 +77,8 @@
       for(const [period,people] of byPeriod){const converted=new Map();for(const [name,cells] of people){const v=Object.create(null);for(const [metric,a]of cells)v[metric]=method==='max'?a.max:method==='min'?a.min:a.sum/a.n;converted.set(name,v);}values.set(period,converted);}
       const result={players,periods:defs,values,method};if(this.cache.size>=16)this.cache.delete(this.cache.keys().next().value);this.cache.set(cacheKey,result);return result;
     }
-    personal(dataset,name,metric){return A.changes(dataset.periods.map(p=>({period:p.key,label:p.label,start:p.start,end:p.end,value:dataset.values.get(p.key)?.get(name)?.[metric]??null})));}
-    team(dataset,metric){return A.changes(dataset.periods.map(p=>{const vals=[...dataset.values.get(p.key).values()].map(v=>v[metric]).filter(B.valid);return{period:p.key,label:p.label,start:p.start,end:p.end,value:A.reduce(vals),n:vals.length};}));}
+    personal(dataset,name,metric){return A.changes(dataset.periods.map(p=>({period:p.key,label:p.label,...A.periodDetails(p),start:p.start,end:p.end,value:dataset.values.get(p.key)?.get(name)?.[metric]??null})));}
+    team(dataset,metric){return A.changes(dataset.periods.map(p=>{const vals=[...dataset.values.get(p.key).values()].map(v=>v[metric]).filter(B.valid);return{period:p.key,label:p.label,...A.periodDetails(p),start:p.start,end:p.end,value:A.reduce(vals),n:vals.length};}));}
     scatter(dataset,x,y,currentKey){
       const points=[],omitted=[];
       for(const player of dataset.players){

@@ -14,17 +14,18 @@
   B.route=()=>{
     const hash=location.hash.slice(1)||'home',[route,...parts]=hash.split('/');
     if(route==='main'){B.UI.main().focus();return;}
-    B.state.route=route;document.querySelectorAll('[data-route]').forEach(el=>el.classList.toggle('active',el.dataset.route===route));
+    B.state.route=route;document.querySelectorAll('[data-route]').forEach(el=>el.classList.toggle('active',el.dataset.route===route));document.querySelectorAll('[data-nav-group]').forEach(group=>group.classList.toggle('open',group.dataset.navGroup===route));
     const dialog=document.getElementById('player-menu');if(dialog.open)dialog.close();
     try{
       if(!B.state.data&&route!=='import'&&route!=='report'){B.Views.import();return;}
       if(route==='player')B.Views.player(decodeURIComponent(parts.join('/')));
       else if(B.Views[route])B.Views[route]();else B.Views.home();
-      window.scrollTo({top:0,behavior:'instant'});
+      window.scrollTo({top:0,behavior:'instant'});if(route==='team'&&B.state.teamSection){const section=B.state.teamSection;B.state.teamSection='';requestAnimationFrame(()=>document.getElementById(section)?.scrollIntoView({behavior:'smooth',block:'start'}));}
     }catch(e){B.UI.main().innerHTML=B.UI.empty('目前頁面無法完成分析',e.message);console.error(e);}
   };
   const start=async()=>{
-    document.getElementById('sidebar-toggle').onclick=()=>{const collapsed=document.body.classList.toggle('sidebar-collapsed');document.getElementById('sidebar-toggle').setAttribute('aria-expanded',String(!collapsed));document.getElementById('sidebar-toggle').textContent=collapsed?'☰ 展開功能欄':'☰ 收合功能欄';B.UI.resizeCharts();};
+    const toggleSidebar=()=>{const collapsed=document.body.classList.toggle('sidebar-collapsed'),label=collapsed?'展開功能欄':'收合功能欄';for(const id of ['sidebar-toggle','sidebar-edge-toggle']){const button=document.getElementById(id);button.setAttribute('aria-expanded',String(!collapsed));button.setAttribute('aria-label',label);button.title=label;button.textContent=id==='sidebar-toggle'?'☰ '+label:collapsed?'›':'‹';}B.UI.resizeCharts();};
+    document.getElementById('sidebar-toggle').onclick=toggleSidebar;document.getElementById('sidebar-edge-toggle').onclick=toggleSidebar;document.querySelectorAll('[data-team-section]').forEach(link=>link.onclick=event=>{const section=link.dataset.teamSection;document.querySelectorAll('[data-team-section]').forEach(x=>x.classList.toggle('active',x===link));if(B.state.route==='team'){event.preventDefault();document.getElementById(section)?.scrollIntoView({behavior:'smooth',block:'start'});}else B.state.teamSection=section;});if(window.matchMedia?.('(max-width:760px)').matches&&!document.body.classList.contains('sidebar-collapsed'))toggleSidebar();
     if(!window.Papa||!window.XLSX||!window.Plotly){B.UI.main().innerHTML='<div class="notice error">本機套件未載入。請完整解壓縮專案，確認 vendor 資料夾存在，再開啟 index.html。</div>';return;}
     let cacheError;
     try{const data=await B.Cache.read();if(data){B.state.cacheOK=true;B.activate(data);}}catch(e){cacheError=e.message;}

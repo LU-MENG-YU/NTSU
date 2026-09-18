@@ -1,6 +1,7 @@
 (function (root) {
   'use strict';
-  const B = root.BB = {VERSION: '1.1.0', SCHEMA: 1};
+  const B = root.BB = {VERSION: '1.3.2', PARSER_VERSION: '1.1.1', SCHEMA: 1};
+  B.needsReparse = data => (data.metadata.parserVersion || data.metadata.version) !== B.PARSER_VERSION;
   B.clean = v => String(v ?? '').trim().replace(/\s+/gu, ' ');
   B.nameKey = v => B.clean(v).toLocaleLowerCase('en');
   B.valid = v => typeof v === 'number' && Number.isFinite(v);
