@@ -1,6 +1,6 @@
 (function (root) {
   'use strict';
-  const B = root.BB = {VERSION: '1.4.3', PARSER_VERSION: '1.1.1', SCHEMA: 1};
+  const B = root.BB = {VERSION: '1.4.5', PARSER_VERSION: '1.1.1', SCHEMA: 1};
   B.needsReparse = data => (data.metadata.parserVersion || data.metadata.version) !== B.PARSER_VERSION;
   B.clean = v => String(v ?? '').trim().replace(/\s+/gu, ' ');
   B.nameKey = v => B.clean(v).toLocaleLowerCase('en');

@@ -213,11 +213,15 @@
     layout.xaxis={...layout.xaxis,title:{text:B.esc(axisLabel(xAxis,xm))},tickformat:'.2f',range:extent('x',result.centerX)};
     layout.yaxis={...layout.yaxis,title:{text:B.esc(axisLabel(yAxis,ym))},range:extent('y',result.centerY)};
     layout.shapes=[];
-    // Quadrant reference axes remain dashed all the way to the positive endpoint.
-    // The direction marker is a head-only glyph placed INSIDE the plot, avoiding
-    // Plotly arrow shafts that can be clipped or rendered as a solid final segment.
-    if(B.valid(result.centerX))layout.shapes.push({type:'line',xref:'x',yref:'paper',x0:result.centerX,x1:result.centerX,y0:0,y1:1,line:{color:'#5f7f91',width:1,dash:'dot'}});
-    if(B.valid(result.centerY))layout.shapes.push({type:'line',xref:'paper',yref:'y',x0:0,x1:1,y0:result.centerY,y1:result.centerY,line:{color:'#5f7f91',width:1,dash:'dot'}});
+    // Positive-direction axes: keep the dashed shaft and render only the arrow HEAD
+    // as a normal scatter marker inside the plotting area.  This avoids Plotly/SVG
+    // annotation clipping at the top/right export boundary.
+    const axisHeadX=.985,axisHeadY=.970;
+    if(B.valid(result.centerX))layout.shapes.push({type:'line',xref:'x',yref:'paper',x0:result.centerX,x1:result.centerX,y0:0,y1:axisHeadY,line:{color:'#5f7f91',width:1,dash:'dot'}});
+    if(B.valid(result.centerY))layout.shapes.push({type:'line',xref:'paper',yref:'y',x0:0,x1:axisHeadX,y0:result.centerY,y1:result.centerY,line:{color:'#5f7f91',width:1,dash:'dot'}});
+    const xr=layout.xaxis.range,yr=layout.yaxis.range;
+    if(B.valid(result.centerY)&&xr?.length===2){const hx=xr[0]+(xr[1]-xr[0])*axisHeadX;traces.push({type:'scatter',mode:'markers',x:[hx],y:[result.centerY],showlegend:false,hoverinfo:'skip',cliponaxis:true,marker:{symbol:'triangle-right',size:10,color:'#5f7f91',line:{width:0}}});}
+    if(B.valid(result.centerX)&&yr?.length===2){const hy=yr[0]+(yr[1]-yr[0])*axisHeadY;traces.push({type:'scatter',mode:'markers',x:[result.centerX],y:[hy],showlegend:false,hoverinfo:'skip',cliponaxis:true,marker:{symbol:'triangle-up',size:10,color:'#5f7f91',line:{width:0}}});}
     if(region?.enabled){
       region=B.Extras.bounds(region);
       const xr=layout.xaxis.range,yr=layout.yaxis.range;
@@ -225,10 +229,6 @@
       if(x0<x1&&y0<y1)layout.shapes.unshift({type:'rect',xref:'x',yref:'y',x0,x1,y0,y1,fillcolor:region.color,opacity:.2,line:{color:region.color,width:1},layer:'below'});
     }
     layout.annotations=movement?points.filter(p=>p.prior&&(p.x!==p.prior.x||p.y!==p.prior.y)).map(p=>({x:p.x,y:p.y,ax:p.x-(p.x-p.prior.x)*.08,ay:p.y-(p.y-p.prior.y)*.08,xref:'x',yref:'y',axref:'x',ayref:'y',showarrow:true,text:'',arrowhead:2,arrowsize:1,arrowwidth:1.2,arrowcolor:'#9aacba'})):[];
-    // Head-only positive-direction markers. Keeping them inside the paper rectangle
-    // prevents the top/right marker from disappearing at responsive/export boundaries.
-    if(B.valid(result.centerY))layout.annotations.push({name:'quadrant-axis-x-positive',x:1,y:result.centerY,xref:'paper',yref:'y',text:'▶',showarrow:false,xanchor:'right',yanchor:'middle',font:{size:10,color:'#5f7f91'},captureevents:false});
-    if(B.valid(result.centerX))layout.annotations.push({name:'quadrant-axis-y-positive',x:result.centerX,y:1,xref:'x',yref:'paper',text:'▲',showarrow:false,xanchor:'center',yanchor:'top',font:{size:10,color:'#5f7f91'},captureevents:false});
     const legendAnnotation=(key,cfg,icon,color)=>({name:'legend-item-'+key,xref:'paper',yref:'paper',x:B.valid(cfg.x)?cfg.x:.02,y:B.valid(cfg.y)?cfg.y:-.16,xanchor:'left',yanchor:'middle',text:`<span style="color:${B.esc(color)}">${icon}</span>&nbsp;${B.esc(cfg.name||'')}`,showarrow:false,font:{size:11,color:'#243e53'},bgcolor:'rgba(255,255,255,.94)',borderpad:2,captureevents:true});
     const hasCurrentDefault=points.some(p=>markStyles.get(p.player.name)?.default);
     if(currentLegend.visible!==false&&hasCurrentDefault)layout.annotations.push(legendAnnotation('current',currentLegend,'●',currentLegend.color||'#197AA4'));
