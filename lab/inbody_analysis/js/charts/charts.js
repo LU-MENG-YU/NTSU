@@ -2,7 +2,7 @@
   'use strict';
   const C=B.Charts={},U=()=>B.UI;
   C.preferences=new Map();
-  C.axisOptions=id=>({xTitle:true,yTitle:true,y2Title:true,xTicks:true,yTicks:true,y2Ticks:true,...C.preferences.get(id)});
+  C.axisOptions=id=>({xTitle:true,yTitle:true,y2Title:true,xTicks:false,yTicks:false,y2Ticks:false,...C.preferences.get(id)});
   C.axisTitleAnnotations=(layout,meta)=>{
     if(!meta?.enabled)return [];
     const common={xref:'paper',yref:'paper',showarrow:false,font:{size:13,color:'#243e53'},bgcolor:'rgba(255,255,255,.94)',borderpad:3};
@@ -48,8 +48,9 @@
     const name=chart.title.replace(/[<>:"/\\|?*\u0000-\u001f]/g,'_');
     if(format==='csv'){C.csv(chart.rows,name+'.csv');return;}
     const el=document.getElementById(id);await chart.ready;
-    const height=900,width=Math.max(1400,chart.time?C.timeMinimumWidth(chart.time,height):0);
-    const url=await Plotly.toImage(C.timeExportFigure?.(el,chart,width,height)||el,{format,width,height,scale:format==='png'?2:1});
+    const width=1280,height=720;
+    const figure=chart.scatter&&C.scatterExportFigure?C.scatterExportFigure(el,chart,width,height):chart.time&&C.timeExportFigure?C.timeExportFigure(el,chart,width,height):{data:el.data,layout:{...el.layout,width,height,autosize:false,margin:{...el.layout.margin}}};
+    const url=await Plotly.toImage(figure,{format,width,height,scale:format==='png'?2:1});
     if(format==='svg'){
       const comma=url.indexOf(','),header=url.slice(0,comma),payload=url.slice(comma+1);
       const svg=header.includes(';base64')?decodeURIComponent(Array.from(atob(payload),c=>'%'+c.charCodeAt(0).toString(16).padStart(2,'0')).join('')):decodeURIComponent(payload);
@@ -72,13 +73,30 @@
     const item={title,rows,ready:null,axisTitleMeta,seasonAnnotations,time,staticAnnotations:(layout.annotations||[]).filter(a=>!seasonAnnotations.includes(a))};delete layout._seasonAnnotations;B.state.chartData.set(id,item);
     B.state.chartJobs.push(async()=>{
       const el=document.getElementById(id);if(!el)return;
-      try{item.ready=Plotly.newPlot(el,traces,layout,{responsive:true,displaylogo:false,scrollZoom:false,modeBarButtonsToRemove:['toImage','select2d','lasso2d'],toImageButtonOptions:{format:'png'}});await item.ready;if(click)el.on('plotly_click',click);if(item.scatter)el.on('plotly_clickannotation',event=>{const name=event.annotation?.name;if(item.scatter.points.some(p=>p.player.name===name))item.scatter.onClick?.(name);});if(item.time)await C.reflowTimeLabels(el);if(item.scatter||item.time)el.on('plotly_relayout',event=>{if(Object.keys(event).some(k=>/^(xaxis|yaxis2?)\.range|autorange|autosize|width|height/.test(k))){C.reflowLabels?.(el);C.reflowTimeLabels?.(el);}});}
+      try{
+        const config={responsive:true,displaylogo:false,scrollZoom:false,modeBarButtonsToRemove:['toImage','select2d','lasso2d'],toImageButtonOptions:{format:'png'}};
+        if(item.scatter)Object.assign(config,{editable:true,edits:{annotationPosition:true,annotationTail:false,annotationText:false,axisTitleText:false,colorbarPosition:false,colorbarTitleText:false,legendPosition:true,legendText:false,shapePosition:false,titleText:false}});
+        item.ready=Plotly.newPlot(el,traces,layout,config);await item.ready;
+        if(click)el.on('plotly_click',click);
+        if(item.scatter){
+          el.on('plotly_clickannotation',event=>{const name=event.annotation?.name;if(item.scatter.points.some(p=>p.player.name===name))item.scatter.onClick?.(name);});
+          el.on('plotly_legenddoubleclick',event=>{const trace=el.data?.[event.curveNumber],group=trace?.legendgroup||'';if(group.startsWith('marker-')){item.scatter.onLegendEdit?.(group.slice(7));return false;}});
+        }
+        if(item.time)await C.reflowTimeLabels(el);
+        if(item.scatter||item.time)el.on('plotly_relayout',event=>{
+          if(item.scatter){
+            for(const key of Object.keys(event)){const m=/^annotations\[(\d+)\]\.(?:ax|ay|x|y)$/.exec(key);if(!m)continue;const ann=el.layout.annotations?.[Number(m[1])],name=ann?.name;if(name&&item.scatter.points.some(p=>p.player.name===name)&&B.valid(Number(ann.ax))&&B.valid(Number(ann.ay))){const size=el._fullLayout?._size||{},w=Number(size.w)||Math.max(1,el.clientWidth-(el.layout.margin?.l||0)-(el.layout.margin?.r||0)),h=Number(size.h)||Math.max(1,el.clientHeight-(el.layout.margin?.t||0)-(el.layout.margin?.b||0));item.scatter.onLabelMove?.(name,{ax:Number(ann.ax),ay:Number(ann.ay),nx:Number(ann.ax)/w,ny:Number(ann.ay)/h});}}
+            if(Object.prototype.hasOwnProperty.call(event,'legend.x')||Object.prototype.hasOwnProperty.call(event,'legend.y'))item.scatter.onLegendMove?.({x:Number(el.layout.legend?.x),y:Number(el.layout.legend?.y),xanchor:el.layout.legend?.xanchor,yanchor:el.layout.legend?.yanchor});
+          }
+          if(Object.keys(event).some(k=>/^(xaxis|yaxis2?)\.range|autorange|autosize|width|height/.test(k))){C.reflowLabels?.(el);C.reflowTimeLabels?.(el);}
+        });
+      }
       catch(e){el.textContent='圖表無法顯示：'+e.message;el.classList.add('chart-error');throw e;}
     });
   };
   C.seasons=(start,end)=>{
     const visible=B.state.data.seasons.filter(s=>s.end>=start&&s.start<=end);
-    return {shapes:visible.map((s,i)=>({type:'rect',xref:'x',yref:'paper',x0:s.start<start?start:s.start,x1:B.iso(new Date((s.end>end?end:s.end)+'T00:00:00Z').getTime()+B.DAY),y0:0,y1:1,fillcolor:palette[i%palette.length],opacity:.09,line:{width:0},layer:'below'})),annotations:visible.map((s,i)=>({xref:'x',yref:'paper',x:s.start<start?start:s.start,y:1-(i%3)*.07,text:B.esc(s.name),showarrow:false,xanchor:'left',yanchor:'top',font:{size:11,color:palette[i%palette.length]}}))};
+    return {shapes:[],annotations:visible.map((s,i)=>({xref:'x',yref:'paper',x:s.start<start?start:s.start,y:1-(i%3)*.07,text:B.esc(s.name),showarrow:false,xanchor:'left',yanchor:'top',font:{size:11,color:palette[i%palette.length]}}))};
   };
   C.timeline=(id,series,metric,{title,summary,team=false,unit='month',history=series}={})=>{
     const x=series.map(r=>r.start),y=series.map(r=>r.value),traces=[];
@@ -97,7 +115,8 @@
     const item=B.state.chartData.get(id);if(item)item.redraw=()=>C.timeline(id,series,metric,{title,summary,team,unit,history});
   };
   // Only labels move; the measurement coordinates and exports remain exact.
-  C.labelAnnotations=(points,xrange,yrange,width,height,{centerX=(xrange[0]+xrange[1])/2,centerY=(yrange[0]+yrange[1])/2,marks=new Map()}={})=>{
+  C.labelAnnotations=(points,xrange,yrange,width,height,options={})=>{
+    const {centerX=(xrange[0]+xrange[1])/2,centerY=(yrange[0]+yrange[1])/2,marks=new Map()}=options;
     const placed=[],out=[],pixels=points.map(p=>({x:(p.x-xrange[0])/(xrange[1]-xrange[0])*width,y:(yrange[1]-p.y)/(yrange[1]-yrange[0])*height}));
     const mx=(centerX-xrange[0])/(xrange[1]-xrange[0])*width,my=(yrange[1]-centerY)/(yrange[1]-yrange[0])*height;
     for(let i=0;i<points.length;i++){
@@ -118,7 +137,9 @@
         if(score<bestScore){bestScore=score;best={box,cx,cy};}if(!collisions&&!covers)break search;
       }
       if(!best){const cx=anchor.x+sx*22,cy=anchor.y+sy*24;best={cx,cy,box:{left:cx-w/2,right:cx+w/2,top:cy-h/2,bottom:cy+h/2}};}
-      placed.push(best.box);out.push({name:p.player.name,x:p.x,y:p.y,xref:'x',yref:'y',text:B.esc(p.player.name),ax:best.cx-anchor.x,ay:best.cy-anchor.y,axref:'pixel',ayref:'pixel',showarrow:true,arrowhead:0,arrowwidth:.8,arrowcolor:'#9baebb',standoff:6,font:{size:12,color:marks.get(p.player.name)||'#243e53'},bgcolor:'rgba(255,255,255,.92)',borderpad:2,captureevents:true});
+      const manual=options.labelOffsets?.get?.(p.player.name),ax=B.valid(manual?.nx)?manual.nx*width:(manual?.ax??best.cx-anchor.x),ay=B.valid(manual?.ny)?manual.ny*height:(manual?.ay??best.cy-anchor.y);
+      const cx=anchor.x+ax,cy=anchor.y+ay,finalBox={left:cx-w/2-3,right:cx+w/2+3,top:cy-h/2-2,bottom:cy+h/2+2};
+      placed.push(finalBox);out.push({name:p.player.name,x:p.x,y:p.y,xref:'x',yref:'y',text:B.esc(p.player.name),ax,ay,axref:'pixel',ayref:'pixel',showarrow:true,arrowhead:0,arrowwidth:.8,arrowcolor:'#9baebb',standoff:6,font:{size:12,color:'#111827'},bgcolor:'rgba(255,255,255,.92)',borderpad:2,captureevents:true});
     }
     return out;
   };
@@ -127,20 +148,27 @@
     const {xaxis,yaxis,margin}=el.layout;
     return Plotly.relayout(el,{annotations:[...meta.arrows.filter(a=>!a.name?.startsWith('axis-title-')),...C.axisTitleAnnotations(el.layout,item.axisTitleMeta),...(meta.names&&meta.spread?C.labelAnnotations(meta.points,xaxis.range,yaxis.range,Math.max(120,el.clientWidth-(margin.l||0)-(margin.r||0)),Math.max(150,el.clientHeight-(margin.t||0)-(margin.b||0)),meta):[])]});
   };
-  C.scatter=(id,result,xAxis,yAxis,{title,summary,names=true,previous=false,movement=false,spread=true,onClick,markStyles=new Map(),region=null,pair=false,referenceLabel='前一期有效位置',currentLabel='當期球員'}={})=>{
+  C.scatterExportFigure=(el,item,width,height)=>{
+    const layout={...el.layout,width,height,autosize:false,margin:{...el.layout.margin},xaxis:{...el.layout.xaxis},yaxis:{...el.layout.yaxis}};
+    for(const key of ['xaxis','yaxis'])if(el._fullLayout?.[key]?.range)layout[key]={...layout[key],range:[...el._fullLayout[key].range],autorange:false};
+    const meta=item.scatter,gW=Math.max(120,width-(layout.margin.l||0)-(layout.margin.r||0)),gH=Math.max(150,height-(layout.margin.t||0)-(layout.margin.b||0));
+    layout.annotations=[...meta.arrows.filter(a=>!a.name?.startsWith('axis-title-')),...C.axisTitleAnnotations(layout,item.axisTitleMeta),...(meta.names&&meta.spread?C.labelAnnotations(meta.points,layout.xaxis.range,layout.yaxis.range,gW,gH,meta):[])];
+    return {data:el.data,layout};
+  };
+  C.scatter=(id,result,xAxis,yAxis,{title,summary,names=true,previous=false,movement=false,spread=true,onClick,onLabelMove,onLegendEdit,onLegendMove,legendPosition=null,labelOffsets=new Map(),markStyles=new Map(),region=null,pair=false,referenceLabel='前一期有效位置',currentLabel='當期球員'}={})=>{
     const metric=k=>B.state.data.registry.find(m=>m.key===k),xm=metric(xAxis.key),ym=metric(yAxis.key),marks=new Map([...markStyles].map(([name,style])=>[name,style.color]));
     const axisLabel=(a,m)=>`${a.mode==='delta'?'Δ':''}${m.label} (${a.mode==='delta'&&m.key==='pbf'?'百分點':m.unit})`;
     const points=result.points,traces=[],prior=result.referencePoints||points.filter(p=>p.prior).map(p=>p.prior);
     const detail=(p,axis)=>{const d=p[axis+'Detail'];return `${B.esc(d.label||d.period)}；比較基準 ${B.esc(d.baseLabel||d.base||'—')}`;};
     const hover=p=>`${B.esc(p.player.name)} · ${B.esc(p.player.level)} · ${B.esc(p.player.position)}<br>${B.esc(axisLabel(xAxis,xm))}：${B.fmt(p.x,xAxis.mode==='delta')}<br>${B.esc(axisLabel(yAxis,ym))}：${B.fmt(p.y,yAxis.mode==='delta')}<br>X 期間：${detail(p,'x')}<br>Y 期間：${detail(p,'y')}`;
-    const defaultColor=p=>{const v=yAxis.mode==='delta'?p.y:xAxis.mode==='delta'?p.x:null;return v===null?'#197aa4':v>0?'#197aa4':v<0?'#197aa4':'#197aa4';};
+    const defaultColor=()=> '#197AA4';
     if(movement){const lx=[],ly=[];for(const p of points)if(p.prior){lx.push(p.prior.x,p.x,null);ly.push(p.prior.y,p.y,null);}if(lx.length)traces.push({type:'scatter',x:lx,y:ly,mode:'lines',name:'移動軌跡',line:{color:'#9aacba',dash:'dash',width:1.3},hoverinfo:'skip'});}
-    if(previous&&prior.length)traces.push({type:'scatter',x:prior.map(p=>p.x),y:prior.map(p=>p.y),mode:'markers',name:referenceLabel,customdata:prior.map(p=>p.player.name),text:prior.map(hover),hovertemplate:'%{text}<extra>'+B.esc(referenceLabel)+'</extra>',marker:{size:9,symbol:'circle-open',color:prior.map(p=>marks.get(p.player.name)||'#8199ac'),line:{width:1.5}}});
-    const pointTrace=(subset,name,color,legendgroup,showlegend=true)=>({type:'scatter',x:subset.map(p=>p.x),y:subset.map(p=>p.y),mode:names&&!spread?'markers+text':'markers',name,text:names&&!spread?subset.map(p=>B.esc(p.player.name)):undefined,textposition:subset.map(p=>(p.y<result.centerY?'bottom ':'top ')+(p.x<result.centerX?'left':'right')),textfont:{size:12,color:color||undefined},hovertext:subset.map(hover),hovertemplate:'%{hovertext}<extra></extra>',customdata:subset.map(p=>p.player.name),legendgroup,showlegend,marker:{size:11,color:color||subset.map(defaultColor),line:{width:1,color:'white'}}});
-    const unmarked=points.filter(p=>!markStyles.has(p.player.name));if(unmarked.length)traces.push(pointTrace(unmarked,currentLabel,null,'current',false));else traces.push({type:'scatter',x:[null],y:[null],mode:'markers',name:currentLabel,legendgroup:'current',showlegend:false,hoverinfo:'skip',marker:{size:11,color:'#197aa4',line:{width:1,color:'white'}}});
+    if(previous&&prior.length)traces.push({type:'scatter',x:prior.map(p=>p.x),y:prior.map(p=>p.y),mode:'markers',name:referenceLabel,customdata:prior.map(p=>p.player.name),text:prior.map(hover),hovertemplate:'%{text}<extra>'+B.esc(referenceLabel)+'</extra>',marker:{size:9,symbol:'circle-open',color:prior.map(p=>marks.get(p.player.name)||'#197AA4'),line:{width:1.5}}});
+    const pointTrace=(subset,name,color,legendgroup,showlegend=true)=>({type:'scatter',x:subset.map(p=>p.x),y:subset.map(p=>p.y),mode:names&&!spread?'markers+text':'markers',name,text:names&&!spread?subset.map(p=>B.esc(p.player.name)):undefined,textposition:subset.map(p=>(p.y<result.centerY?'bottom ':'top ')+(p.x<result.centerX?'left':'right')),textfont:{size:12,color:'#111827'},hovertext:subset.map(hover),hovertemplate:'%{hovertext}<extra></extra>',customdata:subset.map(p=>p.player.name),legendgroup,showlegend,marker:{size:11,color:color||subset.map(defaultColor),line:{width:1,color:'white'}}});
+    const unmarked=points.filter(p=>!markStyles.has(p.player.name));if(unmarked.length)traces.push(pointTrace(unmarked,currentLabel,null,'current',false));else traces.push({type:'scatter',x:[null],y:[null],mode:'markers',name:currentLabel,legendgroup:'current',showlegend:false,hoverinfo:'skip',marker:{size:11,color:'#197AA4',line:{width:1,color:'white'}}});
     const groups=[];for(const style of markStyles.values())if(style&&!groups.some(g=>g.id===style.id))groups.push(style);
     for(const group of groups){const subset=points.filter(p=>markStyles.get(p.player.name)?.id===group.id);if(subset.length)traces.push(pointTrace(subset,group.name||'未命名標記',group.color,'marker-'+group.id,true));}
-    const layout=C.base(title,summary);layout.margin={l:74,r:32,t:86,b:85};
+    const layout=C.base(title,summary);layout.margin={l:74,r:32,t:86,b:85};if(legendPosition)layout.legend={...layout.legend,...legendPosition};
     const extent=(key,center)=>{const vals=[...points,...((previous||movement)?prior:[])].map(p=>p[key]);if(B.valid(center))vals.push(center);if(!vals.length)return [-1,1];let min=Math.min(...vals),max=Math.max(...vals);const pad=Math.max((max-min)*.23,.1);return[min-pad,max+pad];};
     layout.xaxis={...layout.xaxis,title:{text:B.esc(axisLabel(xAxis,xm))},tickformat:'.2f',range:extent('x',result.centerX)};
     layout.yaxis={...layout.yaxis,title:{text:B.esc(axisLabel(yAxis,ym))},range:extent('y',result.centerY)};
@@ -168,9 +196,9 @@
     if(region?.enabled)for(const row of rows)Object.assign(row,{標記框X下限:region.xMin??'不限',標記框X上限:region.xMax??'不限',標記框Y下限:region.yMin??'不限',標記框Y上限:region.yMax??'不限',標記框顏色:region.color});
     if(!rows.length)rows.push({資料點:'無有效資料',分析條件:summary,X指標:xAxis.key,Y指標:yAxis.key});
     C.placeAxisTitles(id,layout,{kind:'scatter',centerX:result.centerX,centerY:result.centerY});
-    const arrows=[...layout.annotations],labelPoints=[...points,...(previous?prior.filter(p=>!points.some(q=>q.player.name===p.player.name)):[])],labelOptions={marks,centerX:B.valid(result.centerX)?result.centerX:(layout.xaxis.range[0]+layout.xaxis.range[1])/2,centerY:B.valid(result.centerY)?result.centerY:(layout.yaxis.range[0]+layout.yaxis.range[1])/2};
+    const arrows=[...layout.annotations],labelPoints=[...points,...(previous?prior.filter(p=>!points.some(q=>q.player.name===p.player.name)):[])],labelOptions={marks,labelOffsets,centerX:B.valid(result.centerX)?result.centerX:(layout.xaxis.range[0]+layout.xaxis.range[1])/2,centerY:B.valid(result.centerY)?result.centerY:(layout.yaxis.range[0]+layout.yaxis.range[1])/2};
     if(names&&spread){const el=typeof document==='undefined'?null:document.getElementById(id);layout.annotations.push(...C.labelAnnotations(labelPoints,layout.xaxis.range,layout.yaxis.range,Math.max(120,(el?.clientWidth||900)-layout.margin.l-layout.margin.r),Math.max(150,(el?.clientHeight||480)-layout.margin.t-layout.margin.b),labelOptions));}
     C.mount(id,traces,layout,rows,title,event=>{const clicked=event.points?.find(p=>p.customdata);if(!clicked)return;const pool=[...points,...((previous||movement)?prior:[])];const same=[...new Set(pool.filter(p=>p.x===clicked.x&&p.y===clicked.y).map(p=>p.player.name))];onClick?.(same.length>1?same:clicked.customdata);});
-    const item=B.state.chartData.get(id);if(item)item.scatter={points:labelPoints,names,spread,arrows,onClick,...labelOptions};
+    const item=B.state.chartData.get(id);if(item)item.scatter={points:labelPoints,names,spread,arrows,onClick,onLabelMove,onLegendEdit,onLegendMove,...labelOptions};
   };
 })(BB);

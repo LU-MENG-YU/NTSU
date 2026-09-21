@@ -1,6 +1,6 @@
 (function (root) {
   'use strict';
-  const B = root.BB = {VERSION: '1.3.2', PARSER_VERSION: '1.1.1', SCHEMA: 1};
+  const B = root.BB = {VERSION: '1.4.0', PARSER_VERSION: '1.1.1', SCHEMA: 1};
   B.needsReparse = data => (data.metadata.parserVersion || data.metadata.version) !== B.PARSER_VERSION;
   B.clean = v => String(v ?? '').trim().replace(/\s+/gu, ' ');
   B.nameKey = v => B.clean(v).toLocaleLowerCase('en');
@@ -42,6 +42,15 @@
   B.positions = players => [...new Set(['投手','內野','外野','捕手',...players.map(p=>p.position)])].filter(x=>players.some(p=>p.position===x));
   B.sortPlayers = players => [...players].sort((a,b)=>B.positions(players).indexOf(a.position)-B.positions(players).indexOf(b.position)||a.number.localeCompare(b.number,'zh-Hant',{numeric:true})||a.name.localeCompare(b.name,'zh-Hant'));
   B.levels = players => [...new Set(['一軍','二軍',...players.map(p=>p.level)])];
+
+  B.filterList = value => {
+    if(value===null||value===undefined||value===''||(Array.isArray(value)&&value.length===0))return null;
+    const list=Array.isArray(value)?value:[value];
+    if(list.includes('__NONE__'))return [];
+    return [...new Set(list.map(B.clean).filter(Boolean))];
+  };
+  B.filterMatch = (value,actual) => {const list=B.filterList(value);return list===null?true:list.includes(actual);};
+  B.filterText = (value,allLabel) => {const list=B.filterList(value);return list===null?allLabel:list.length?list.join('、'):'未選';};
   B.methodName = m => ({avg:'Average 平均',max:'Maximum 最大',min:'Minimum 最小'}[m]);
   B.measurementTime = row => {
     const v=row.raw?.analysis_time;

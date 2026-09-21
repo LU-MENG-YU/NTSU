@@ -55,7 +55,7 @@
       for(const row of data.rows){this.byName.get(row.name)?.push(row);const y=row.date.slice(0,4);if(!this.byYear.has(y))this.byYear.set(y,[]);this.byYear.get(y).push(row);}
       this.min=data.rows[0]?.date;this.max=data.rows.at(-1)?.date;this.years=[...this.byYear.keys()].sort();
     }
-    players(filter={}){return this.data.players.filter(p=>(!filter.level||p.level===filter.level)&&(!filter.position||p.position===filter.position)&&(!filter.name||p.name===filter.name));}
+    players(filter={}){return this.data.players.filter(p=>B.filterMatch(filter.level,p.level)&&B.filterMatch(filter.position,p.position)&&(!filter.name||p.name===filter.name));}
     aggregate({filter={},unit='month',method='avg',start=this.min,end=this.max,periods=null}={}){
       if(unit==='week')method='avg';
       const cacheKey=JSON.stringify({filter,unit,method,start,end,periods});if(this.cache.has(cacheKey))return this.cache.get(cacheKey);
