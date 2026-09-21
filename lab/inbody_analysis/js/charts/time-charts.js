@@ -1,7 +1,7 @@
 (function(B){
   'use strict';
   const C=B.Charts,E=B.Extras;
-  C.timeOptions=id=>({seasons:true,values:true,deltas:true,weekDates:true,high:false,low:false,mean:false,trend:false,...C.preferences.get(id)});
+  C.timeOptions=id=>({seasons:true,seasonBands:true,gridMode:'both',values:true,deltas:true,weekDates:true,high:false,low:false,mean:false,trend:false,...C.preferences.get(id)});
   C.timeTicks=(series,unit,options={})=>{
     if(unit==='week')return {tickmode:'array',tickvals:series.map(r=>r.start),ticktext:series.map((r,i)=>{
       const sameYear=r.start.slice(0,4)===r.end.slice(0,4),dates=(sameYear?r.start.slice(5):r.start).replace(/-/g,'/')+'～'+(sameYear?r.end.slice(5):r.end).replace(/-/g,'/');
@@ -102,10 +102,16 @@
   };
   C.timeExportFigure=(el,item,width,height)=>{
     if(!item.time)return el;
-    const layout={...el.layout,width,height,margin:{...el.layout.margin}};
-    // Preserve the current zoom while arranging labels for the exported canvas.
+    const meta=item.time,options=C.timeOptions(el.id),margin={...el.layout.margin};
+    // Canonical export margins are recomputed from the export canvas, not the current device width.
+    let legendRows=1,lineWidth=0,available=Math.max(240,width-(margin.l||0)-(margin.r||0));
+    for(const trace of el.data||[]){const itemWidth=Array.from(trace.name||'').reduce((n,c)=>n+(c.charCodeAt(0)>255?11:6),45);if(lineWidth&&lineWidth+itemWidth>available){legendRows++;lineWidth=0;}lineWidth+=itemWidth;}
+    margin.b=Math.max(90+legendRows*24+(meta.unit==='week'&&options.xTicks!==false?(options.weekDates===false?15:30):0),95);
+    margin.t=Math.max(options.titlesFollowAxes===false?el.layout.margin.t||95:128,el.layout.margin.t||0);
+    const layout={...el.layout,width,height,autosize:false,margin};
+    // Preserve the current zoom while arranging labels for the canonical export canvas.
     for(const key of ['xaxis','yaxis','yaxis2'])if(el._fullLayout[key])layout[key]={...layout[key],range:[...el._fullLayout[key].range],autorange:false};
-    const g=C.timeGeometry(layout,el.data,width,height),meta=item.time;
+    const g=C.timeGeometry(layout,el.data,width,height);
     if(meta.weekTicks)layout.xaxis={...layout.xaxis,ticktext:C.weekTickText(meta.weekTicks,layout.xaxis.range,g.width)};
     layout.annotations=[...meta.staticAnnotations,...C.timePaperAnnotations(C.timeLabelAnnotations(meta.labels,g,C.timeObstacles(meta.staticAnnotations,g)),g)];
     return {data:el.data,layout};
@@ -134,7 +140,7 @@
     layout.annotations.push(...C.timePaperAnnotations(C.timeLabelAnnotations(labels,g,C.timeObstacles(layout.annotations,g)),g));
     return sets;
   };
-  C.dualTimeline=(id,sets,{title,summary,unit='month'}={})=>{
+  C.dualTimeline=(id,sets,{title,summary,unit='month',team=false}={})=>{
     const options=C.timeOptions(id),series=sets[0].series,start=series[0]?.start,end=series.at(-1)?.end,traces=[],layout=C.base(title,summary);
     layout.margin={l:80,r:85,t:95,b:95};
     layout.xaxis={...layout.xaxis,type:'date',title:{text:unit==='week'?'週次':unit==='day'?'日期':unit==='year'?'年度':'月份'},...C.timeTicks(series,unit,options)};
@@ -149,6 +155,15 @@
     });
     if(start){Object.assign(layout,C.seasons(start,end));layout._seasonAnnotations=layout.annotations;if(!options.seasons)layout.annotations=[];}
     C.decorateTime(id,traces,layout,configured,start,end,unit);
+    const gridMode=team?(options.gridMode||'both'):'none';
+    const showVertical=gridMode==='both'||gridMode==='vertical';
+    const showHorizontal=gridMode==='both'||gridMode==='horizontal';
+    layout.paper_bgcolor='#fff';
+    layout.plot_bgcolor='#fff';
+    layout.xaxis={...layout.xaxis,showgrid:showVertical,gridcolor:layout.xaxis?.gridcolor||'#edf1f5',zeroline:false};
+    layout.yaxis={...layout.yaxis,showgrid:showHorizontal,gridcolor:layout.yaxis?.gridcolor||'#e7edf3',zeroline:false};
+    if(layout.yaxis2)layout.yaxis2={...layout.yaxis2,showgrid:false,zeroline:false};
+    if(!team||options.seasonBands===false)layout.shapes=(layout.shapes||[]).filter(shape=>shape?.type!=='rect');
     if(!configured.some(s=>s.series.some(r=>B.valid(r.value))))layout.annotations.push({xref:'paper',yref:'paper',x:.5,y:.5,text:'此期間沒有有效指標資料',showarrow:false});
     const rows=series.map((r,i)=>{
       const out={期間:r.label||r.period,開始:r.start,結束:r.end,分析條件:summary};
@@ -159,6 +174,6 @@
         if(options.trend)out[prefix+'趨勢估計']=B.fmt(set.trendFit?.predict(row.start));
       }return out;
     });
-    C.mount(id,traces,layout,rows,title);const item=B.state.chartData.get(id);if(item)item.redraw=()=>C.dualTimeline(id,sets,{title,summary,unit});
+    C.mount(id,traces,layout,rows,title);const item=B.state.chartData.get(id);if(item)item.redraw=()=>C.dualTimeline(id,sets,{title,summary,unit,team});
   };
 })(BB);
