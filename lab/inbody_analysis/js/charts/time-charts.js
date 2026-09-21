@@ -102,16 +102,10 @@
   };
   C.timeExportFigure=(el,item,width,height)=>{
     if(!item.time)return el;
-    const meta=item.time,options=C.timeOptions(el.id),margin={...el.layout.margin};
-    // Canonical export margins are recomputed from the export canvas, not the current device width.
-    let legendRows=1,lineWidth=0,available=Math.max(240,width-(margin.l||0)-(margin.r||0));
-    for(const trace of el.data||[]){const itemWidth=Array.from(trace.name||'').reduce((n,c)=>n+(c.charCodeAt(0)>255?11:6),45);if(lineWidth&&lineWidth+itemWidth>available){legendRows++;lineWidth=0;}lineWidth+=itemWidth;}
-    margin.b=Math.max(90+legendRows*24+(meta.unit==='week'&&options.xTicks!==false?(options.weekDates===false?15:30):0),95);
-    margin.t=Math.max(options.titlesFollowAxes===false?el.layout.margin.t||95:128,el.layout.margin.t||0);
-    const layout={...el.layout,width,height,autosize:false,margin};
-    // Preserve the current zoom while arranging labels for the canonical export canvas.
+    const layout={...el.layout,width,height,margin:{...el.layout.margin}};
+    // Preserve the current zoom while arranging labels for the exported canvas.
     for(const key of ['xaxis','yaxis','yaxis2'])if(el._fullLayout[key])layout[key]={...layout[key],range:[...el._fullLayout[key].range],autorange:false};
-    const g=C.timeGeometry(layout,el.data,width,height);
+    const g=C.timeGeometry(layout,el.data,width,height),meta=item.time;
     if(meta.weekTicks)layout.xaxis={...layout.xaxis,ticktext:C.weekTickText(meta.weekTicks,layout.xaxis.range,g.width)};
     layout.annotations=[...meta.staticAnnotations,...C.timePaperAnnotations(C.timeLabelAnnotations(meta.labels,g,C.timeObstacles(meta.staticAnnotations,g)),g)];
     return {data:el.data,layout};
