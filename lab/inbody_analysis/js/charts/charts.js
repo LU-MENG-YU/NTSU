@@ -43,14 +43,15 @@
     const safe=rows.map(row=>Object.fromEntries(Object.entries(row).map(([k,v])=>[k,typeof v==='string'&&/^[=+\-@\t\r]/.test(v)&&!/^[-+]?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?$/.test(v)?"'"+v:v])));
     C.download('\uFEFF'+Papa.unparse(safe),filename,'text/csv;charset=utf-8');
   };
+  C.exportSize=chart=>chart.scatter?{width:1200,height:600}:chart.time?{width:1200,height:650}:{width:1200,height:650};
   C.export=async(id,format)=>{
     const chart=B.state.chartData.get(id);if(!chart)throw Error('圖表尚未完成，請稍後再試。');
     const name=chart.title.replace(/[<>:"/\\|?*\u0000-\u001f]/g,'_');
     if(format==='csv'){C.csv(chart.rows,name+'.csv');return;}
     const el=document.getElementById(id);await chart.ready;
-    const width=1280,height=720;
+    const {width,height}=C.exportSize(chart);
     const figure=chart.scatter&&C.scatterExportFigure?C.scatterExportFigure(el,chart,width,height):chart.time&&C.timeExportFigure?C.timeExportFigure(el,chart,width,height):{data:el.data,layout:{...el.layout,width,height,autosize:false,margin:{...el.layout.margin}}};
-    const url=await Plotly.toImage(figure,{format,width,height,scale:format==='png'?2:1});
+    const url=await Plotly.toImage(figure,{format,width,height,scale:1});
     if(format==='svg'){
       const comma=url.indexOf(','),header=url.slice(0,comma),payload=url.slice(comma+1);
       const svg=header.includes(';base64')?decodeURIComponent(Array.from(atob(payload),c=>'%'+c.charCodeAt(0).toString(16).padStart(2,'0')).join('')):decodeURIComponent(payload);
@@ -65,6 +66,42 @@
     const a=document.createElement('a');a.href=url;a.download=name+'.'+format;document.body.append(a);a.click();a.remove();
   };
   C.base=(title,subtitle)=>({title:{text:B.esc(title)+'<br><sup>'+B.esc(subtitle)+'</sup>',font:{size:15},x:.06,xanchor:'left'},font:{family:'Microsoft JhengHei, Arial, sans-serif',size:12,color:'#243e53'},paper_bgcolor:'#fff',plot_bgcolor:'#fff',margin:{l:66,r:28,t:86,b:75},hoverlabel:{font:{size:13}},legend:{orientation:'h',x:0,y:-.19,font:{size:11}},showlegend:true,dragmode:'zoom',hovermode:'closest',xaxis:{showgrid:false,zeroline:false,automargin:true},yaxis:{showgrid:false,zeroline:false,automargin:true,tickformat:'.2f'}});
+  C.rawAnnotationIndex=(el,node)=>{const raw=node?.getAttribute?.('data-index');if(raw!==null&&raw!==undefined&&/^\d+$/.test(raw))return Number(raw);return [...el.querySelectorAll('g.annotation')].indexOf(node);};
+  C.annotationIndex=(el,node,item)=>{
+    const names=new Set(item?.scatter?.points?.map(p=>p.player.name)||[]),raw=C.rawAnnotationIndex(el,node);
+    if(raw>=0&&(!names.size||names.has(el.layout.annotations?.[raw]?.name)))return raw;
+    const text=node?.querySelector?.('.annotation-text')?.textContent?.trim();if(text&&names.has(text)){const index=(el.layout.annotations||[]).findIndex(a=>a?.name===text);if(index>=0)return index;}
+    return -1;
+  };
+  C.refreshScatterLabelHandles=(el,item)=>{
+    if(!el||!item?.scatter)return;
+    [...el.querySelectorAll('g.annotation')].forEach(group=>{const raw=C.rawAnnotationIndex(el,group),rawAnn=raw>=0?el.layout.annotations?.[raw]:null,index=C.annotationIndex(el,group,item),ann=index>=0?el.layout.annotations?.[index]:null,text=group.querySelector('.annotation-text-g'),labelActive=!!ann?.name&&item.scatter.points.some(p=>p.player.name===ann.name),legendActive=!!rawAnn?.name&&rawAnn.name.startsWith('legend-item-');group.classList.toggle('bb-draggable-label',labelActive);group.classList.toggle('bb-draggable-legend',legendActive);if(text){text.style.cursor=labelActive?'grab':legendActive?'move':'';text.style.touchAction=(labelActive||legendActive)?'none':'';}});
+  };
+  C.enableScatterLabelDrag=(el,item)=>{
+    if(!el||!item?.scatter||el._bbScatterLabelDragBound)return;el._bbScatterLabelDragBound=true;
+    el.addEventListener('pointerdown',event=>{
+      const textGroup=event.target?.closest?.('.annotation-text-g');if(!textGroup||!el.contains(textGroup))return;const group=textGroup.closest('g.annotation');if(!group)return;
+      const rawIndex=C.rawAnnotationIndex(el,group),rawAnn=rawIndex>=0?el.layout.annotations?.[rawIndex]:null;
+      if(rawAnn?.name?.startsWith('legend-item-')){
+        event.preventDefault();event.stopPropagation();textGroup.style.cursor='grabbing';item.scatter._labelDragging=true;
+        const key=rawAnn.name.slice('legend-item-'.length),startClientX=event.clientX,startClientY=event.clientY,startX=Number(rawAnn.x)||0,startY=Number(rawAnn.y)||0,size=el._fullLayout?._size||{},w=Math.max(1,Number(size.w)||el.clientWidth),h=Math.max(1,Number(size.h)||el.clientHeight);let latestX=startX,latestY=startY,frame=0,moved=false;
+        const draw=()=>{frame=0;if(!el.isConnected)return;Plotly.relayout(el,{[`annotations[${rawIndex}].x`]:latestX,[`annotations[${rawIndex}].y`]:latestY}).catch(()=>{});};
+        const move=ev=>{latestX=Math.max(-.35,Math.min(1.08,startX+(ev.clientX-startClientX)/w));latestY=Math.max(-.42,Math.min(1.08,startY-(ev.clientY-startClientY)/h));moved=moved||Math.hypot(ev.clientX-startClientX,ev.clientY-startClientY)>2;if(!frame)frame=requestAnimationFrame(draw);ev.preventDefault();ev.stopPropagation();};
+        const up=ev=>{window.removeEventListener('pointermove',move,true);window.removeEventListener('pointerup',up,true);window.removeEventListener('pointercancel',up,true);if(frame){cancelAnimationFrame(frame);frame=0;}if(!el.isConnected)return;Plotly.relayout(el,{[`annotations[${rawIndex}].x`]:latestX,[`annotations[${rawIndex}].y`]:latestY}).then(()=>{const stored=item.scatter.arrows?.find(a=>a.name===rawAnn.name);if(stored){stored.x=latestX;stored.y=latestY;}item.scatter.onLegendItemMove?.(key,{x:latestX,y:latestY});C.refreshScatterLabelHandles(el,item);}).catch(()=>{});item.scatter._labelDragging=false;if(moved)item.scatter.suppressClickUntil=performance.now()+300;textGroup.style.cursor='move';ev.preventDefault();ev.stopPropagation();};
+        window.addEventListener('pointermove',move,{capture:true,passive:false});window.addEventListener('pointerup',up,{capture:true,passive:false,once:true});window.addEventListener('pointercancel',up,{capture:true,passive:false,once:true});return;
+      }
+      const index=C.annotationIndex(el,group,item),ann=index>=0?el.layout.annotations?.[index]:null,name=ann?.name;if(index<0||!name||!item.scatter.points.some(p=>p.player.name===name))return;
+      event.preventDefault();event.stopPropagation();textGroup.style.cursor='grabbing';item.scatter._labelDragging=true;
+      const startX=event.clientX,startY=event.clientY,startAx=Number(ann.ax)||0,startAy=Number(ann.ay)||0;let latestAx=startAx,latestAy=startAy,frame=0,moved=false;
+      const draw=()=>{frame=0;if(!el.isConnected)return;Plotly.relayout(el,{[`annotations[${index}].ax`]:latestAx,[`annotations[${index}].ay`]:latestAy}).catch(()=>{});};
+      const move=ev=>{latestAx=startAx+(ev.clientX-startX);latestAy=startAy+(ev.clientY-startY);moved=moved||Math.hypot(ev.clientX-startX,ev.clientY-startY)>2;if(!frame)frame=requestAnimationFrame(draw);ev.preventDefault();ev.stopPropagation();};
+      const up=ev=>{window.removeEventListener('pointermove',move,true);window.removeEventListener('pointerup',up,true);window.removeEventListener('pointercancel',up,true);if(frame){cancelAnimationFrame(frame);frame=0;}if(!el.isConnected)return;
+        Plotly.relayout(el,{[`annotations[${index}].ax`]:latestAx,[`annotations[${index}].ay`]:latestAy}).then(()=>{const current=el.layout.annotations?.[index],size=el._fullLayout?._size||{},w=Number(size.w)||Math.max(1,el.clientWidth-(el.layout.margin?.l||0)-(el.layout.margin?.r||0)),h=Number(size.h)||Math.max(1,el.clientHeight-(el.layout.margin?.t||0)-(el.layout.margin?.b||0));if(current)item.scatter.onLabelMove?.(name,{ax:Number(current.ax),ay:Number(current.ay),nx:Number(current.ax)/w,ny:Number(current.ay)/h});C.refreshScatterLabelHandles(el,item);}).catch(()=>{});
+        item.scatter._labelDragging=false;if(moved)item.scatter.suppressClickUntil=performance.now()+300;textGroup.style.cursor='grab';ev.preventDefault();ev.stopPropagation();};
+      window.addEventListener('pointermove',move,{capture:true,passive:false});window.addEventListener('pointerup',up,{capture:true,passive:false,once:true});window.addEventListener('pointercancel',up,{capture:true,passive:false,once:true});
+    },true);
+    el.addEventListener('dblclick',event=>{const textGroup=event.target?.closest?.('.annotation-text-g');if(!textGroup||!el.contains(textGroup))return;const group=textGroup.closest('g.annotation'),index=C.rawAnnotationIndex(el,group),ann=index>=0?el.layout.annotations?.[index]:null;if(ann?.name?.startsWith('legend-item-')){event.preventDefault();event.stopPropagation();item.scatter.onLegendItemEdit?.(ann.name.slice('legend-item-'.length));}},true);
+  };
   C.mount=(id,traces,layout,rows,title,click)=>{
     const axisTitleMeta=C.placeAxisTitles(id,layout);delete layout._axisTitleMeta;
     const seasonAnnotations=layout._seasonAnnotations||[];
@@ -75,20 +112,22 @@
       const el=document.getElementById(id);if(!el)return;
       try{
         const config={responsive:true,displaylogo:false,scrollZoom:false,modeBarButtonsToRemove:['toImage','select2d','lasso2d'],toImageButtonOptions:{format:'png'}};
-        if(item.scatter)Object.assign(config,{editable:true,edits:{annotationPosition:true,annotationTail:false,annotationText:false,axisTitleText:false,colorbarPosition:false,colorbarTitleText:false,legendPosition:true,legendText:false,shapePosition:false,titleText:false}});
+        if(item.scatter)Object.assign(config,{editable:true,edits:{annotationPosition:false,annotationTail:false,annotationText:false,axisTitleText:false,colorbarPosition:false,colorbarTitleText:false,legendPosition:true,legendText:false,shapePosition:false,titleText:false}});
         item.ready=Plotly.newPlot(el,traces,layout,config);await item.ready;
         if(click)el.on('plotly_click',click);
         if(item.scatter){
-          el.on('plotly_clickannotation',event=>{const name=event.annotation?.name;if(item.scatter.points.some(p=>p.player.name===name))item.scatter.onClick?.(name);});
+          C.enableScatterLabelDrag(el,item);C.refreshScatterLabelHandles(el,item);
+          el.on('plotly_clickannotation',event=>{if(item.scatter._labelDragging||(item.scatter.suppressClickUntil||0)>performance.now())return;const name=event.annotation?.name;if(item.scatter.points.some(p=>p.player.name===name))item.scatter.onClick?.(name);});
           el.on('plotly_legenddoubleclick',event=>{const trace=el.data?.[event.curveNumber],group=trace?.legendgroup||'';if(group.startsWith('marker-')){item.scatter.onLegendEdit?.(group.slice(7));return false;}});
         }
         if(item.time)await C.reflowTimeLabels(el);
         if(item.scatter||item.time)el.on('plotly_relayout',event=>{
           if(item.scatter){
-            for(const key of Object.keys(event)){const m=/^annotations\[(\d+)\]\.(?:ax|ay|x|y)$/.exec(key);if(!m)continue;const ann=el.layout.annotations?.[Number(m[1])],name=ann?.name;if(name&&item.scatter.points.some(p=>p.player.name===name)&&B.valid(Number(ann.ax))&&B.valid(Number(ann.ay))){const size=el._fullLayout?._size||{},w=Number(size.w)||Math.max(1,el.clientWidth-(el.layout.margin?.l||0)-(el.layout.margin?.r||0)),h=Number(size.h)||Math.max(1,el.clientHeight-(el.layout.margin?.t||0)-(el.layout.margin?.b||0));item.scatter.onLabelMove?.(name,{ax:Number(ann.ax),ay:Number(ann.ay),nx:Number(ann.ax)/w,ny:Number(ann.ay)/h});}}
+            for(const key of Object.keys(event)){const m=/^annotations\[(\d+)\]\.(?:ax|ay)$/.exec(key);if(!m)continue;const ann=el.layout.annotations?.[Number(m[1])],name=ann?.name;if(name&&item.scatter.points.some(p=>p.player.name===name)&&B.valid(Number(ann.ax))&&B.valid(Number(ann.ay))){const size=el._fullLayout?._size||{},w=Number(size.w)||Math.max(1,el.clientWidth-(el.layout.margin?.l||0)-(el.layout.margin?.r||0)),h=Number(size.h)||Math.max(1,el.clientHeight-(el.layout.margin?.t||0)-(el.layout.margin?.b||0));item.scatter.onLabelMove?.(name,{ax:Number(ann.ax),ay:Number(ann.ay),nx:Number(ann.ax)/w,ny:Number(ann.ay)/h});}}
             if(Object.prototype.hasOwnProperty.call(event,'legend.x')||Object.prototype.hasOwnProperty.call(event,'legend.y'))item.scatter.onLegendMove?.({x:Number(el.layout.legend?.x),y:Number(el.layout.legend?.y),xanchor:el.layout.legend?.xanchor,yanchor:el.layout.legend?.yanchor});
           }
           if(Object.keys(event).some(k=>/^(xaxis|yaxis2?)\.range|autorange|autosize|width|height/.test(k))){C.reflowLabels?.(el);C.reflowTimeLabels?.(el);}
+          if(item.scatter)requestAnimationFrame(()=>C.refreshScatterLabelHandles(el,item));
         });
       }
       catch(e){el.textContent='圖表無法顯示：'+e.message;el.classList.add('chart-error');throw e;}
@@ -139,7 +178,7 @@
       if(!best){const cx=anchor.x+sx*22,cy=anchor.y+sy*24;best={cx,cy,box:{left:cx-w/2,right:cx+w/2,top:cy-h/2,bottom:cy+h/2}};}
       const manual=options.labelOffsets?.get?.(p.player.name),ax=B.valid(manual?.nx)?manual.nx*width:(manual?.ax??best.cx-anchor.x),ay=B.valid(manual?.ny)?manual.ny*height:(manual?.ay??best.cy-anchor.y);
       const cx=anchor.x+ax,cy=anchor.y+ay,finalBox={left:cx-w/2-3,right:cx+w/2+3,top:cy-h/2-2,bottom:cy+h/2+2};
-      placed.push(finalBox);out.push({name:p.player.name,x:p.x,y:p.y,xref:'x',yref:'y',text:B.esc(p.player.name),ax,ay,axref:'pixel',ayref:'pixel',showarrow:true,arrowhead:0,arrowwidth:.8,arrowcolor:'#9baebb',standoff:6,font:{size:12,color:'#111827'},bgcolor:'rgba(255,255,255,.92)',borderpad:2,captureevents:true});
+      placed.push(finalBox);out.push({name:p.player.name,x:p.x,y:p.y,xref:'x',yref:'y',text:B.esc(p.player.name),ax,ay,axref:'pixel',ayref:'pixel',showarrow:true,arrowhead:0,arrowwidth:.8,arrowcolor:'#9baebb',standoff:6,startstandoff:2,font:{size:12,color:'#111827'},bgcolor:'rgba(255,255,255,.92)',borderpad:2,captureevents:true});
     }
     return out;
   };
@@ -149,34 +188,36 @@
     return Plotly.relayout(el,{annotations:[...meta.arrows.filter(a=>!a.name?.startsWith('axis-title-')),...C.axisTitleAnnotations(el.layout,item.axisTitleMeta),...(meta.names&&meta.spread?C.labelAnnotations(meta.points,xaxis.range,yaxis.range,Math.max(120,el.clientWidth-(margin.l||0)-(margin.r||0)),Math.max(150,el.clientHeight-(margin.t||0)-(margin.b||0)),meta):[])]});
   };
   C.scatterExportFigure=(el,item,width,height)=>{
-    const layout={...el.layout,width,height,autosize:false,margin:{...el.layout.margin},xaxis:{...el.layout.xaxis},yaxis:{...el.layout.yaxis}};
+    const layout={...el.layout,width,height,autosize:false,margin:{l:98,r:34,t:64,b:112},font:{...el.layout.font,size:13},title:{...el.layout.title,x:.025,font:{...(el.layout.title?.font||{}),size:17}},legend:{...el.layout.legend,font:{...(el.layout.legend?.font||{}),size:12}},xaxis:{...el.layout.xaxis},yaxis:{...el.layout.yaxis}};
     for(const key of ['xaxis','yaxis'])if(el._fullLayout?.[key]?.range)layout[key]={...layout[key],range:[...el._fullLayout[key].range],autorange:false};
-    const meta=item.scatter,gW=Math.max(120,width-(layout.margin.l||0)-(layout.margin.r||0)),gH=Math.max(150,height-(layout.margin.t||0)-(layout.margin.b||0));
+    const meta=item.scatter,gW=Math.max(120,width-layout.margin.l-layout.margin.r),gH=Math.max(150,height-layout.margin.t-layout.margin.b);
     layout.annotations=[...meta.arrows.filter(a=>!a.name?.startsWith('axis-title-')),...C.axisTitleAnnotations(layout,item.axisTitleMeta),...(meta.names&&meta.spread?C.labelAnnotations(meta.points,layout.xaxis.range,layout.yaxis.range,gW,gH,meta):[])];
     return {data:el.data,layout};
   };
-  C.scatter=(id,result,xAxis,yAxis,{title,summary,names=true,previous=false,movement=false,spread=true,onClick,onLabelMove,onLegendEdit,onLegendMove,legendPosition=null,labelOffsets=new Map(),markStyles=new Map(),region=null,pair=false,referenceLabel='前一期有效位置',currentLabel='當期球員'}={})=>{
+  C.scatter=(id,result,xAxis,yAxis,{title,summary,names=true,previous=false,movement=false,spread=true,onClick,onLabelMove,onLegendEdit,onLegendMove,onLegendItemMove,onLegendItemEdit,legendPosition=null,seriesLegends={},labelOffsets=new Map(),markStyles=new Map(),region=null,pair=false,referenceLabel='前一期有效位置',currentLabel='當期球員'}={})=>{
     const metric=k=>B.state.data.registry.find(m=>m.key===k),xm=metric(xAxis.key),ym=metric(yAxis.key),marks=new Map([...markStyles].map(([name,style])=>[name,style.color]));
     const axisLabel=(a,m)=>`${a.mode==='delta'?'Δ':''}${m.label} (${a.mode==='delta'&&m.key==='pbf'?'百分點':m.unit})`;
     const points=result.points,traces=[],prior=result.referencePoints||points.filter(p=>p.prior).map(p=>p.prior);
     const detail=(p,axis)=>{const d=p[axis+'Detail'];return `${B.esc(d.label||d.period)}；比較基準 ${B.esc(d.baseLabel||d.base||'—')}`;};
     const hover=p=>`${B.esc(p.player.name)} · ${B.esc(p.player.level)} · ${B.esc(p.player.position)}<br>${B.esc(axisLabel(xAxis,xm))}：${B.fmt(p.x,xAxis.mode==='delta')}<br>${B.esc(axisLabel(yAxis,ym))}：${B.fmt(p.y,yAxis.mode==='delta')}<br>X 期間：${detail(p,'x')}<br>Y 期間：${detail(p,'y')}`;
-    const defaultColor=()=> '#197AA4';
-    if(movement){const lx=[],ly=[];for(const p of points)if(p.prior){lx.push(p.prior.x,p.x,null);ly.push(p.prior.y,p.y,null);}if(lx.length)traces.push({type:'scatter',x:lx,y:ly,mode:'lines',name:'移動軌跡',line:{color:'#9aacba',dash:'dash',width:1.3},hoverinfo:'skip'});}
-    if(previous&&prior.length)traces.push({type:'scatter',x:prior.map(p=>p.x),y:prior.map(p=>p.y),mode:'markers',name:referenceLabel,customdata:prior.map(p=>p.player.name),text:prior.map(hover),hovertemplate:'%{text}<extra>'+B.esc(referenceLabel)+'</extra>',marker:{size:9,symbol:'circle-open',color:prior.map(p=>marks.get(p.player.name)||'#197AA4'),line:{width:1.5}}});
+    const defaultColor=()=> '#197AA4',movementLegend={visible:true,name:'移動軌跡',color:'#9AACBA',x:.43,y:-.16,...(seriesLegends.movement||{})},previousLegend={visible:true,name:referenceLabel,color:'#197AA4',x:.20,y:-.16,...(seriesLegends.previous||{})},currentLegend={visible:true,name:currentLabel,color:'#197AA4',x:.02,y:-.16,...(seriesLegends.current||{})};
+    let hasMovement=false;
+    if(movement){const lx=[],ly=[];for(const p of points)if(p.prior){lx.push(p.prior.x,p.x,null);ly.push(p.prior.y,p.y,null);}if(lx.length){hasMovement=true;traces.push({type:'scatter',x:lx,y:ly,mode:'lines',name:movementLegend.name||'移動軌跡',showlegend:false,line:{color:movementLegend.color||'#9AACBA',dash:'dash',width:1.3},hoverinfo:'skip'});}}
+    if(previous&&prior.length)traces.push({type:'scatter',x:prior.map(p=>p.x),y:prior.map(p=>p.y),mode:'markers',name:previousLegend.name||referenceLabel,showlegend:false,customdata:prior.map(p=>p.player.name),text:prior.map(hover),hovertemplate:'%{text}<extra>'+B.esc(previousLegend.name||referenceLabel)+'</extra>',marker:{size:9,symbol:'circle-open',color:previousLegend.color||'#197AA4',line:{width:1.5,color:previousLegend.color||'#197AA4'}}});
     const pointTrace=(subset,name,color,legendgroup,showlegend=true)=>({type:'scatter',x:subset.map(p=>p.x),y:subset.map(p=>p.y),mode:names&&!spread?'markers+text':'markers',name,text:names&&!spread?subset.map(p=>B.esc(p.player.name)):undefined,textposition:subset.map(p=>(p.y<result.centerY?'bottom ':'top ')+(p.x<result.centerX?'left':'right')),textfont:{size:12,color:'#111827'},hovertext:subset.map(hover),hovertemplate:'%{hovertext}<extra></extra>',customdata:subset.map(p=>p.player.name),legendgroup,showlegend,marker:{size:11,color:color||subset.map(defaultColor),line:{width:1,color:'white'}}});
     const unmarked=points.filter(p=>!markStyles.has(p.player.name));if(unmarked.length)traces.push(pointTrace(unmarked,currentLabel,null,'current',false));else traces.push({type:'scatter',x:[null],y:[null],mode:'markers',name:currentLabel,legendgroup:'current',showlegend:false,hoverinfo:'skip',marker:{size:11,color:'#197AA4',line:{width:1,color:'white'}}});
     const groups=[];for(const style of markStyles.values())if(style&&!groups.some(g=>g.id===style.id))groups.push(style);
-    for(const group of groups){const subset=points.filter(p=>markStyles.get(p.player.name)?.id===group.id);if(subset.length)traces.push(pointTrace(subset,group.name||'未命名標記',group.color,'marker-'+group.id,true));}
+    for(const group of groups){const subset=points.filter(p=>markStyles.get(p.player.name)?.id===group.id);if(subset.length)traces.push(pointTrace(subset,group.name||'未命名標記',group.color,'marker-'+group.id,!group.default&&group.legendVisible!==false));}
     const layout=C.base(title,summary);layout.margin={l:74,r:32,t:86,b:85};if(legendPosition)layout.legend={...layout.legend,...legendPosition};
     const extent=(key,center)=>{const vals=[...points,...((previous||movement)?prior:[])].map(p=>p[key]);if(B.valid(center))vals.push(center);if(!vals.length)return [-1,1];let min=Math.min(...vals),max=Math.max(...vals);const pad=Math.max((max-min)*.23,.1);return[min-pad,max+pad];};
     layout.xaxis={...layout.xaxis,title:{text:B.esc(axisLabel(xAxis,xm))},tickformat:'.2f',range:extent('x',result.centerX)};
     layout.yaxis={...layout.yaxis,title:{text:B.esc(axisLabel(yAxis,ym))},range:extent('y',result.centerY)};
     layout.shapes=[];
-    // Quadrant reference axes stop just before the positive endpoint; a short arrow annotation
-    // completes the final segment so the arrowhead sits directly on the dashed center line.
-    if(B.valid(result.centerX))layout.shapes.push({type:'line',xref:'x',yref:'paper',x0:result.centerX,x1:result.centerX,y0:0,y1:.965,line:{color:'#5f7f91',width:1,dash:'dot'}});
-    if(B.valid(result.centerY))layout.shapes.push({type:'line',xref:'paper',yref:'y',x0:0,x1:.965,y0:result.centerY,y1:result.centerY,line:{color:'#5f7f91',width:1,dash:'dot'}});
+    // Quadrant reference axes remain dashed all the way to the positive endpoint.
+    // The direction marker is a head-only glyph placed INSIDE the plot, avoiding
+    // Plotly arrow shafts that can be clipped or rendered as a solid final segment.
+    if(B.valid(result.centerX))layout.shapes.push({type:'line',xref:'x',yref:'paper',x0:result.centerX,x1:result.centerX,y0:0,y1:1,line:{color:'#5f7f91',width:1,dash:'dot'}});
+    if(B.valid(result.centerY))layout.shapes.push({type:'line',xref:'paper',yref:'y',x0:0,x1:1,y0:result.centerY,y1:result.centerY,line:{color:'#5f7f91',width:1,dash:'dot'}});
     if(region?.enabled){
       region=B.Extras.bounds(region);
       const xr=layout.xaxis.range,yr=layout.yaxis.range;
@@ -184,11 +225,15 @@
       if(x0<x1&&y0<y1)layout.shapes.unshift({type:'rect',xref:'x',yref:'y',x0,x1,y0,y1,fillcolor:region.color,opacity:.2,line:{color:region.color,width:1},layer:'below'});
     }
     layout.annotations=movement?points.filter(p=>p.prior&&(p.x!==p.prior.x||p.y!==p.prior.y)).map(p=>({x:p.x,y:p.y,ax:p.x-(p.x-p.prior.x)*.08,ay:p.y-(p.y-p.prior.y)*.08,xref:'x',yref:'y',axref:'x',ayref:'y',showarrow:true,text:'',arrowhead:2,arrowsize:1,arrowwidth:1.2,arrowcolor:'#9aacba'})):[];
-    // Positive-direction arrowheads belong to the quadrant reference axes themselves:
-    // X arrow at the right endpoint of the horizontal center line, Y arrow at the top endpoint
-    // of the vertical center line. They are visual-only and never affect ranges or calculations.
-    if(B.valid(result.centerY))layout.annotations.push({name:'quadrant-axis-x-positive',x:1,y:result.centerY,ax:.965,ay:result.centerY,xref:'paper',yref:'y',axref:'paper',ayref:'y',text:'',showarrow:true,arrowhead:2,arrowsize:.9,arrowwidth:1.2,arrowcolor:'#5f7f91',captureevents:false});
-    if(B.valid(result.centerX))layout.annotations.push({name:'quadrant-axis-y-positive',x:result.centerX,y:1,ax:result.centerX,ay:.965,xref:'x',yref:'paper',axref:'x',ayref:'paper',text:'',showarrow:true,arrowhead:2,arrowsize:.9,arrowwidth:1.2,arrowcolor:'#5f7f91',captureevents:false});
+    // Head-only positive-direction markers. Keeping them inside the paper rectangle
+    // prevents the top/right marker from disappearing at responsive/export boundaries.
+    if(B.valid(result.centerY))layout.annotations.push({name:'quadrant-axis-x-positive',x:1,y:result.centerY,xref:'paper',yref:'y',text:'▶',showarrow:false,xanchor:'right',yanchor:'middle',font:{size:10,color:'#5f7f91'},captureevents:false});
+    if(B.valid(result.centerX))layout.annotations.push({name:'quadrant-axis-y-positive',x:result.centerX,y:1,xref:'x',yref:'paper',text:'▲',showarrow:false,xanchor:'center',yanchor:'top',font:{size:10,color:'#5f7f91'},captureevents:false});
+    const legendAnnotation=(key,cfg,icon,color)=>({name:'legend-item-'+key,xref:'paper',yref:'paper',x:B.valid(cfg.x)?cfg.x:.02,y:B.valid(cfg.y)?cfg.y:-.16,xanchor:'left',yanchor:'middle',text:`<span style="color:${B.esc(color)}">${icon}</span>&nbsp;${B.esc(cfg.name||'')}`,showarrow:false,font:{size:11,color:'#243e53'},bgcolor:'rgba(255,255,255,.94)',borderpad:2,captureevents:true});
+    const hasCurrentDefault=points.some(p=>markStyles.get(p.player.name)?.default);
+    if(currentLegend.visible!==false&&hasCurrentDefault)layout.annotations.push(legendAnnotation('current',currentLegend,'●',currentLegend.color||'#197AA4'));
+    if(previous&&prior.length&&previousLegend.visible!==false)layout.annotations.push(legendAnnotation('previous',previousLegend,'○',previousLegend.color||'#197AA4'));
+    if(hasMovement&&movementLegend.visible!==false)layout.annotations.push(legendAnnotation('movement',movementLegend,'┄┄',movementLegend.color||'#9AACBA'));
     if(!points.length&&!(previous&&prior.length))layout.annotations.push({x:.5,y:.5,xref:'paper',yref:'paper',text:'沒有同時具備 X、Y 有效值的球員',showarrow:false});
     const exportPoint=(p,type)=>{const style=markStyles.get(p.player.name);return {資料點:type,姓名:p.player.name,背號:p.player.number,分級:p.player.level,位置:p.player.position,標記點:style?.name||'',標記顏色:style?.color||'',期間:p.label||p.period,X指標:xAxis.key,X模式:xAxis.mode,X單位:xAxis.mode==='delta'&&xm.key==='pbf'?'百分點':xm.unit,X值:B.fmt(p.x,xAxis.mode==='delta'),X比較基準:p.xDetail.baseLabel||p.xDetail.base||'—',X前期值:B.fmt(p.xDetail.previous),Y指標:yAxis.key,Y模式:yAxis.mode,Y單位:yAxis.mode==='delta'&&ym.key==='pbf'?'百分點':ym.unit,Y值:B.fmt(p.y,yAxis.mode==='delta'),Y比較基準:p.yDetail.baseLabel||p.yDetail.base||'—',Y前期值:B.fmt(p.yDetail.previous),X中心:B.fmt(result.centerX),Y中心:B.fmt(result.centerY),分析條件:summary};};
     const rows=[...points.map(p=>exportPoint(p,currentLabel)),...((previous||movement)?prior.map(p=>exportPoint(p,referenceLabel)):[])];
@@ -199,6 +244,6 @@
     const arrows=[...layout.annotations],labelPoints=[...points,...(previous?prior.filter(p=>!points.some(q=>q.player.name===p.player.name)):[])],labelOptions={marks,labelOffsets,centerX:B.valid(result.centerX)?result.centerX:(layout.xaxis.range[0]+layout.xaxis.range[1])/2,centerY:B.valid(result.centerY)?result.centerY:(layout.yaxis.range[0]+layout.yaxis.range[1])/2};
     if(names&&spread){const el=typeof document==='undefined'?null:document.getElementById(id);layout.annotations.push(...C.labelAnnotations(labelPoints,layout.xaxis.range,layout.yaxis.range,Math.max(120,(el?.clientWidth||900)-layout.margin.l-layout.margin.r),Math.max(150,(el?.clientHeight||480)-layout.margin.t-layout.margin.b),labelOptions));}
     C.mount(id,traces,layout,rows,title,event=>{const clicked=event.points?.find(p=>p.customdata);if(!clicked)return;const pool=[...points,...((previous||movement)?prior:[])];const same=[...new Set(pool.filter(p=>p.x===clicked.x&&p.y===clicked.y).map(p=>p.player.name))];onClick?.(same.length>1?same:clicked.customdata);});
-    const item=B.state.chartData.get(id);if(item)item.scatter={points:labelPoints,names,spread,arrows,onClick,onLabelMove,onLegendEdit,onLegendMove,...labelOptions};
+    const item=B.state.chartData.get(id);if(item)item.scatter={points:labelPoints,names,spread,arrows,onClick,onLabelMove,onLegendEdit,onLegendMove,onLegendItemMove,onLegendItemEdit,...labelOptions};
   };
 })(BB);

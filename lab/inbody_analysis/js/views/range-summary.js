@@ -83,12 +83,13 @@
     U.bind('range-summary-custom','toggle',()=>{state.customOpen=document.getElementById('range-summary-custom').open;if(state.customOpen)R.paintCustom();});
   };
   R.wireControls=()=>{
-    const rerenderFor=()=>{const next=readControls();try{validate(next);state={...next,hidden:state.hidden,customOpen:state.customOpen,customKeys:state.customKeys};R.render(document.querySelector('.range-summary')?.id||'comparison-range-summary');}catch(err){U.toast(err.message);}};
+    const rerenderFor=()=>{const next=readControls();try{validate(next);const eligibleNames=new Set(B.state.engine.players({level:next.level,position:next.position}).map(p=>p.name)),hidden=new Set([...state.hidden].filter(name=>eligibleNames.has(name)));state={...next,hidden,customOpen:state.customOpen,customKeys:state.customKeys};R.render(document.querySelector('.range-summary')?.id||'comparison-range-summary');}catch(err){U.toast(err.message);}};
+    for(const id of ['range-summary-level','range-summary-position'])U.bind(id,'change',rerenderFor);
     U.bind('range-summary-unit','change',()=>{state.unit=U.val('range-summary-unit');R.render(document.querySelector('.range-summary')?.id||'comparison-range-summary');});
     for(const id of ['range-summary-start-week-month','range-summary-end-week-month'])U.bind(id,'change',()=>{const isStart=id.includes('start'),m=U.val(id),weeks=B.Extras.monthWeeks(m);if(isStart){state.startWeekMonth=m;state.startWeek=weeks[0]?.index||'1';}else{state.endWeekMonth=m;state.endWeek=weeks.at(-1)?.index||'1';}R.render(document.querySelector('.range-summary')?.id||'comparison-range-summary');});
     document.getElementById('range-summary-form').onsubmit=event=>{
       event.preventDefault();const next=readControls(),error=document.getElementById('range-summary-error');
-      try{validate(next);state={...next,hidden:state.hidden,customOpen:state.customOpen,customKeys:state.customKeys};error.hidden=true;R.render(document.querySelector('.range-summary')?.id||'comparison-range-summary');}
+      try{validate(next);const eligibleNames=new Set(B.state.engine.players({level:next.level,position:next.position}).map(p=>p.name)),hidden=new Set([...state.hidden].filter(name=>eligibleNames.has(name)));state={...next,hidden,customOpen:state.customOpen,customKeys:state.customKeys};error.hidden=true;R.render(document.querySelector('.range-summary')?.id||'comparison-range-summary');}
       catch(err){error.textContent=err.message+' 表格仍顯示上次套用的條件。';error.hidden=false;}
     };
     document.getElementById('range-player-all')?.addEventListener('click',()=>{eligible().forEach(p=>state.hidden.delete(p.name));R.paintPlayerSelector();R.paint();});
