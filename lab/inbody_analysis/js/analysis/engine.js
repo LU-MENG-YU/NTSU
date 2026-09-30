@@ -14,6 +14,11 @@
     let previous=null;
     return series.map(r=>{const out={...r,...A.delta(r.value,previous?.value),base:B.valid(r.value)?previous?.period||null:null,baseLabel:B.valid(r.value)?previous?.label||previous?.period||null:null,previous:B.valid(r.value)?previous?.value??null:null};if(B.valid(r.value))previous=r;return out;});
   };
+  A.rebase=(series,baseKey)=>{
+    if(!baseKey)return series;
+    const base=series.find(r=>r.period===baseKey&&B.valid(r.value));
+    return series.map(r=>{if(!base||!B.valid(r.value))return {...r,delta:null,pct:null,base:base?.period||null,baseLabel:base?.label||base?.period||null,previous:base?.value??null};return {...r,...A.delta(r.value,base.value),base:base.period,baseLabel:base.label||base.period,previous:base.value};});
+  };
   A.periodKey=(date,unit)=>unit==='week'?B.iso(Date.parse(date+'T00:00:00Z')-new Date(date+'T00:00:00Z').getUTCDay()*B.DAY):date.slice(0,unit==='day'?10:unit==='year'?4:7);
   A.periods=(start,end,unit='month')=>{
     const range=B.range(start,end);const p=[];let date=range.start;
@@ -79,10 +84,10 @@
     }
     personal(dataset,name,metric){return A.changes(dataset.periods.map(p=>({period:p.key,label:p.label,...A.periodDetails(p),start:p.start,end:p.end,value:dataset.values.get(p.key)?.get(name)?.[metric]??null})));}
     team(dataset,metric){return A.changes(dataset.periods.map(p=>{const vals=[...dataset.values.get(p.key).values()].map(v=>v[metric]).filter(B.valid);return{period:p.key,label:p.label,...A.periodDetails(p),start:p.start,end:p.end,value:A.reduce(vals),n:vals.length};}));}
-    scatter(dataset,x,y,currentKey){
+    scatter(dataset,x,y,currentKey,baseKey=null){
       const points=[],omitted=[];
       for(const player of dataset.players){
-        const xs=this.personal(dataset,player.name,x.key),ys=this.personal(dataset,player.name,y.key);
+        const xs=A.rebase(this.personal(dataset,player.name,x.key),baseKey),ys=A.rebase(this.personal(dataset,player.name,y.key),baseKey);
         const idx=xs.findIndex(p=>p.period===currentKey);if(idx<0)continue;
         const val=(r,mode)=>mode==='delta'?r.delta:r.value;
         const make=i=>({player,period:xs[i].period,label:xs[i].label,x:val(xs[i],x.mode),y:val(ys[i],y.mode),xDetail:xs[i],yDetail:ys[i]});
