@@ -133,8 +133,9 @@
       catch(e){el.textContent='圖表無法顯示：'+e.message;el.classList.add('chart-error');throw e;}
     });
   };
-  C.seasons=(start,end)=>{
-    const visible=B.state.data.seasons.filter(s=>s.end>=start&&s.start<=end);
+  C.seasonKey=season=>[season.name,season.start,season.end].join('|');
+  C.seasons=(start,end,hiddenSeasons=[])=>{
+    const hidden=new Set(hiddenSeasons||[]),visible=B.state.data.seasons.filter(s=>s.end>=start&&s.start<=end&&!hidden.has(C.seasonKey(s)));
     return {
       shapes:visible.map((s,i)=>({type:'rect',xref:'x',yref:'paper',x0:s.start<start?start:s.start,x1:B.iso(new Date((s.end>end?end:s.end)+'T00:00:00Z').getTime()+B.DAY),y0:0,y1:1,fillcolor:palette[i%palette.length],opacity:.09,line:{width:0},layer:'below'})),
       annotations:visible.map((s,i)=>({xref:'x',yref:'paper',x:s.start<start?start:s.start,y:1-(i%3)*.07,text:B.esc(s.name),showarrow:false,xanchor:'left',yanchor:'top',font:{size:11,color:palette[i%palette.length]}}))
@@ -148,13 +149,13 @@
     const layout=C.base(title,summary),start=series[0]?.start,end=series.at(-1)?.end;
     layout.xaxis={...layout.xaxis,title:{text:unit==='week'?'週次':unit==='day'?'日期':unit==='year'?'年度':'月份'},type:'date',...(start?{range:[B.iso(new Date(start+'T00:00:00Z')-B.DAY*2),B.iso(new Date(end+'T00:00:00Z').getTime()+B.DAY*2)]}:{}),...(C.timeTicks?.(series,unit,C.timeOptions?.(id))||{tickmode:'array',tickvals:x,ticktext:series.map(r=>r.label||r.period),tickangle:series.length>6?-40:0})};
     layout.yaxis.title={text:`${B.esc(metric.label)} (${B.esc(metric.unit)})`};
-    if(start){Object.assign(layout,C.seasons(start,end));layout._seasonAnnotations=layout.annotations;if(C.preferences.get(id)?.seasons===false)layout.annotations=[];}
+    const visualOptions=C.timeOptions?.(id)||{};
+    if(start){Object.assign(layout,C.seasons(start,end,visualOptions.hiddenSeasons));layout._seasonAnnotations=layout.annotations;if(C.preferences.get(id)?.seasons===false)layout.annotations=[];}
     if(!y.some(B.valid))layout.annotations=[...(layout.annotations||[]),{xref:'paper',yref:'paper',x:.5,y:.5,text:'此期間沒有有效指標資料',showarrow:false,font:{color:'#6d8193'}}];
     const decorated=C.decorateTime?.(id,traces,layout,[{series,history,metric}],start,end,unit)?.[0];
     // Team charts keep the original season bands and grid by default, but both are user-configurable.
     // Personal time charts preserve the cleaner no-grid/no-band presentation.
-    const visualOptions=C.timeOptions?.(id)||{};
-    const gridMode=team?(visualOptions.gridMode||'both'):'none';
+    const gridMode=visualOptions.gridMode||'both';
     const showVertical=gridMode==='both'||gridMode==='vertical';
     const showHorizontal=gridMode==='both'||gridMode==='horizontal';
     layout.paper_bgcolor='#fff';
@@ -162,7 +163,7 @@
     layout.xaxis={...layout.xaxis,showgrid:showVertical,gridcolor:layout.xaxis?.gridcolor||'#edf1f5',zeroline:false};
     layout.yaxis={...layout.yaxis,showgrid:showHorizontal,gridcolor:layout.yaxis?.gridcolor||'#e7edf3',zeroline:false};
     if(layout.yaxis2)layout.yaxis2={...layout.yaxis2,showgrid:false,zeroline:false};
-    if(!team||visualOptions.seasonBands===false)layout.shapes=(layout.shapes||[]).filter(shape=>shape?.type!=='rect');
+    if(visualOptions.seasonBands===false)layout.shapes=(layout.shapes||[]).filter(shape=>shape?.type!=='rect');
     const rows=series.map(r=>({期間:r.label||r.period,開始:r.start,結束:r.end,指標:metric.key,單位:metric.unit,代表值:B.fmt(r.value),...(team?{人數:r.n}:{}),['Δ'+metric.label]:B.fmt(r.delta,true),['Δ'+metric.label+'%']:B.fmt(r.pct,true),比較基準:r.baseLabel||r.base||'—',分析條件:summary}));
     if(decorated){const options=C.timeOptions(id);for(const [i,row] of rows.entries()){for(const [key,stat,label] of [['high','max','歷史最高'],['low','min','歷史最低'],['mean','mean','歷史期間點平均']])if(options[key])row[label]=B.fmt(decorated.referenceStats[stat]);if(options.trend)row.趨勢估計=B.fmt(decorated.trendFit?.predict(series[i].start));}}
     C.mount(id,traces,layout,rows,title);
