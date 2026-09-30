@@ -1,7 +1,7 @@
 (function(B){
   'use strict';
   const C=B.Charts,E=B.Extras;
-  C.timeOptions=id=>({seasons:true,seasonBands:true,gridMode:'both',values:true,deltas:true,weekDates:true,high:false,low:false,mean:false,trend:false,...C.preferences.get(id)});
+  C.timeOptions=id=>({seasons:true,seasonBands:true,gridMode:'both',hiddenSeasons:[],values:true,deltas:true,weekDates:true,high:false,low:false,mean:false,trend:false,...C.preferences.get(id)});
   C.timeTicks=(series,unit,options={})=>{
     if(unit==='week')return {tickmode:'array',tickvals:series.map(r=>r.start),ticktext:series.map((r,i)=>{
       const sameYear=r.start.slice(0,4)===r.end.slice(0,4),dates=(sameYear?r.start.slice(5):r.start).replace(/-/g,'/')+'～'+(sameYear?r.end.slice(5):r.end).replace(/-/g,'/');
@@ -153,9 +153,9 @@
       const x=[],y=[];let previous=-1;series.forEach((r,i)=>{if(B.valid(r.value)){if(previous>=0&&i>previous+1){x.push(series[previous].start,r.start,null);y.push(series[previous].value,r.value,null);}previous=i;}});
       if(x.length)traces.push({type:'scatter',mode:'lines',x,y,yaxis:axis,line:{color,width:1.5,dash:'dot'},name:metric.label+' 跨缺失期間',hoverinfo:'skip'});
     });
-    if(start){Object.assign(layout,C.seasons(start,end));layout._seasonAnnotations=layout.annotations;if(!options.seasons)layout.annotations=[];}
+    if(start){Object.assign(layout,C.seasons(start,end,options.hiddenSeasons));layout._seasonAnnotations=layout.annotations;if(!options.seasons)layout.annotations=[];}
     C.decorateTime(id,traces,layout,configured,start,end,unit);
-    const gridMode=team?(options.gridMode||'both'):'none';
+    const gridMode=options.gridMode||'both';
     const showVertical=gridMode==='both'||gridMode==='vertical';
     const showHorizontal=gridMode==='both'||gridMode==='horizontal';
     layout.paper_bgcolor='#fff';
@@ -163,7 +163,7 @@
     layout.xaxis={...layout.xaxis,showgrid:showVertical,gridcolor:layout.xaxis?.gridcolor||'#edf1f5',zeroline:false};
     layout.yaxis={...layout.yaxis,showgrid:showHorizontal,gridcolor:layout.yaxis?.gridcolor||'#e7edf3',zeroline:false};
     if(layout.yaxis2)layout.yaxis2={...layout.yaxis2,showgrid:false,zeroline:false};
-    if(!team||options.seasonBands===false)layout.shapes=(layout.shapes||[]).filter(shape=>shape?.type!=='rect');
+    if(options.seasonBands===false)layout.shapes=(layout.shapes||[]).filter(shape=>shape?.type!=='rect');
     if(!configured.some(s=>s.series.some(r=>B.valid(r.value))))layout.annotations.push({xref:'paper',yref:'paper',x:.5,y:.5,text:'此期間沒有有效指標資料',showarrow:false});
     const rows=series.map((r,i)=>{
       const out={期間:r.label||r.period,開始:r.start,結束:r.end,分析條件:summary};
